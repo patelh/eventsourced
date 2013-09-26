@@ -1,6 +1,21 @@
+resolvers += "Cloudera Releases" at "https://repository.cloudera.com/artifactory/cloudera-repos"
+
 libraryDependencies ++= Seq(
   "com.google.protobuf"  %  "protobuf-java" % "2.4.1"         % "compile",
-  "org.apache.hadoop"    %  "hadoop-core"   % Version.Hadoop  % "compile"
+  "org.apache.hadoop"    %  "hadoop-common"   % Version.Hadoop % "compile"
+    exclude("commons-daemon","commons-daemon")
+    exclude("commons-httpclient", "commons-httpclient")
+    exclude("commons-beanutils", "commons-beanutils-core")
+    exclude("commons-collections", "commons-collections")
+    exclude("org.mortbay.jetty", "jsp-api-2.1")
+    exclude("org.mortbay.jetty", "jsp-2.1")
+    exclude("org.mortbay.jetty", "jetty-util")
+    exclude("org.mortbay.jetty", "jetty")
+    exclude("tomcat", "jasper-runtime")
+    exclude("tomcat", "jasper-compiler")
+    exclude("junit", "junit"),
+  "org.apache.hadoop"    %  "hadoop-hdfs"   % Version.Hadoop % "compile"
+    exclude("commons-daemon","commons-daemon")
     exclude("commons-httpclient", "commons-httpclient")
     exclude("commons-beanutils", "commons-beanutils-core")
     exclude("commons-collections", "commons-collections")
