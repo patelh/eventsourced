@@ -29,9 +29,10 @@ trait AsynchronousWriteReplaySupport extends Actor {
 
   private val deadLetters = context.system.deadLetters
 
-  private lazy val w = writer
+  private lazy val w = if(journalProps.readOnly) new ReadOnlyWriter else writer
   private lazy val r = replayer
   private lazy val s = snapshotter
+  private lazy val ro = journalProps.readOnly
 
   private var _counter = 0L
   private var _counterResequencer = 1L
@@ -62,23 +63,38 @@ trait AsynchronousWriteReplaySupport extends Actor {
     _counterResequencer += inc
   }
 
+  private def writeInMsg(cmd: WriteInMsg) = {
+    val c = if(cmd.genSequenceNr) cmd.withSequenceNr(counter) else { _counter = cmd.message.sequenceNr; cmd }
+    asyncWriteAndResequence(c.withTimestamp, w.executeWriteInMsg)
+    _counter += 1L
+  }
+
+  private def writeOutMsg(cmd: WriteOutMsg) = {
+    val c = if(cmd.genSequenceNr) cmd.withSequenceNr(counter) else { _counter = cmd.message.sequenceNr; cmd }
+    asyncWriteAndResequence(c, w.executeWriteOutMsg)
+    _counter += 1L
+  }
+
+  private def writeAck(cmd: WriteAck) = {
+    asyncWriteAndResequence(cmd, w.executeWriteAck)
+  }
+
+  private def deleteOutMsg(cmd: DeleteOutMsg) = {
+    asyncWriteAndResequence(cmd, w.executeDeleteOutMsg)
+  }
+
+  private def noop(cmd: Any) = {}
+
+  private lazy val writeInMsgF: WriteInMsg=>Unit = if(ro) noop else writeInMsg
+  private lazy val writeOutMsgF: WriteOutMsg=>Unit = if(ro) noop else writeOutMsg
+  private lazy val writeAckF: WriteAck=>Unit = if(ro) noop else writeAck
+  private lazy val deleteOutMsgF: DeleteOutMsg=>Unit = if(ro) noop else deleteOutMsg
+
   def receive = {
-    case cmd: WriteInMsg => {
-      val c = if(cmd.genSequenceNr) cmd.withSequenceNr(counter) else { _counter = cmd.message.sequenceNr; cmd }
-      asyncWriteAndResequence(c.withTimestamp, w.executeWriteInMsg)
-      _counter += 1L
-    }
-    case cmd: WriteOutMsg => {
-      val c = if(cmd.genSequenceNr) cmd.withSequenceNr(counter) else { _counter = cmd.message.sequenceNr; cmd }
-      asyncWriteAndResequence(c, w.executeWriteOutMsg)
-      _counter += 1L
-    }
-    case cmd: WriteAck => {
-      asyncWriteAndResequence(cmd, w.executeWriteAck)
-    }
-    case cmd: DeleteOutMsg => {
-      asyncWriteAndResequence(cmd, w.executeDeleteOutMsg)
-    }
+    case cmd: WriteInMsg =>  writeInMsgF(cmd)
+    case cmd: WriteOutMsg => writeOutMsgF(cmd)
+    case cmd: WriteAck => writeAckF(cmd)
+    case cmd: DeleteOutMsg => deleteOutMsgF(cmd)
     case cmd: Loop => {
       asyncResequence(cmd)
     }
@@ -151,6 +167,16 @@ trait AsynchronousWriteReplaySupport extends Actor {
     def loadSnapshot(processorId: Int, snapshotFilter: SnapshotMetadata => Boolean): Future[Option[Snapshot]]
     def saveSnapshot(snapshot: Snapshot): Future[SnapshotSaved]
     def snapshotSaved(metadata: SnapshotMetadata)
+  }
+
+  class ReadOnlyWriter extends Writer {
+    def executeWriteInMsg(cmd: WriteInMsg): Future[Any] = throw new RuntimeException("Read-only mode!")
+
+    def executeWriteOutMsg(cmd: WriteOutMsg): Future[Any] = throw new RuntimeException("Read-only mode!")
+
+    def executeWriteAck(cmd: WriteAck): Future[Any] = throw new RuntimeException("Read-only mode!")
+
+    def executeDeleteOutMsg(cmd: DeleteOutMsg): Future[Any] = throw new RuntimeException("Read-only mode!")
   }
 
   class Resequencer(initialCounter: Long, replayer: Replayer) extends Actor {

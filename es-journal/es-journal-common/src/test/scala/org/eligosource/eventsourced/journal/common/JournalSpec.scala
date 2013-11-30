@@ -55,11 +55,11 @@ abstract class JournalSpec extends WordSpec with MustMatchers {
       p(queue.poll(duration.toMillis, TimeUnit.MILLISECONDS))
     }
 
-    def replayInMsgs(processorId: Int, fromSequenceNr: Long, target: ActorRef) {
+    def replayInMsgs(journal: ActorRef, processorId: Int, fromSequenceNr: Long, target: ActorRef) {
       Await.result(journal ? ReplayInMsgs(processorId, fromSequenceNr, target), duration)
     }
 
-    def replayOutMsgs(channelId: Int, fromSequenceNr: Long, target: ActorRef) {
+    def replayOutMsgs(journal: ActorRef, channelId: Int, fromSequenceNr: Long, target: ActorRef) {
       journal ! ReplayOutMsgs(channelId, fromSequenceNr, target)
     }
 
@@ -75,6 +75,7 @@ abstract class JournalSpec extends WordSpec with MustMatchers {
   }
 
   def journalProps: JournalProps
+  def readOnlyJournalProps: JournalProps
 
   "A journal" must {
     "persist and timestamp input messages" in { fixture =>
@@ -83,7 +84,7 @@ abstract class JournalSpec extends WordSpec with MustMatchers {
       journal ! WriteInMsg(1, Message("test-1"), writeTarget)
       journal ! WriteInMsg(1, Message("test-2"), writeTarget)
 
-      replayInMsgs(1, 0, replayTarget)
+      replayInMsgs(journal, 1, 0, replayTarget)
 
       dequeue(replayQueue) { m => m must be(Message("test-1", sequenceNr = 1, timestamp = m.timestamp)); m.timestamp must be > (0L) }
       dequeue(replayQueue) { m => m must be(Message("test-2", sequenceNr = 2, timestamp = m.timestamp)); m.timestamp must be > (0L) }
@@ -94,7 +95,7 @@ abstract class JournalSpec extends WordSpec with MustMatchers {
       journal ! WriteOutMsg(1, Message("test-1"), 1, SkipAck, writeTarget)
       journal ! WriteOutMsg(1, Message("test-2"), 1, SkipAck, writeTarget)
 
-      replayOutMsgs(1, 0, replayTarget)
+      replayOutMsgs(journal, 1, 0, replayTarget)
 
       dequeue(replayQueue) { m => m must be(Message("test-1", sequenceNr = 1, timestamp = 0L)) }
       dequeue(replayQueue) { m => m must be(Message("test-2", sequenceNr = 2, timestamp = 0L)) }
@@ -105,7 +106,7 @@ abstract class JournalSpec extends WordSpec with MustMatchers {
       journal ! WriteInMsg(1, Message("test-1", sequenceNr = 5), writeTarget, false)
       journal ! WriteInMsg(1, Message("test-2"), writeTarget)
 
-      replayInMsgs(1, 0, replayTarget)
+      replayInMsgs(journal, 1, 0, replayTarget)
 
       dequeue(replayQueue) { m => m must be(Message("test-1", sequenceNr = 5, timestamp = m.timestamp)) }
       dequeue(replayQueue) { m => m must be(Message("test-2", sequenceNr = 6, timestamp = m.timestamp)) }
@@ -116,7 +117,7 @@ abstract class JournalSpec extends WordSpec with MustMatchers {
       journal ! WriteInMsg(1, Message("test-1"), writeTarget)
       journal ! WriteAck(1, 1, 1)
 
-      replayInMsgs(1, 0, replayTarget)
+      replayInMsgs(journal, 1, 0, replayTarget)
 
       dequeue(replayQueue) { m => m must be(Message("test-1", sequenceNr = 1, acks = List(1), timestamp = m.timestamp)) }
     }
@@ -126,13 +127,13 @@ abstract class JournalSpec extends WordSpec with MustMatchers {
       journal ! WriteInMsg(1, Message("test-1"), writeTarget)
       journal ! WriteOutMsg(1, Message("test-2"), 1, 1, writeTarget)
 
-      replayInMsgs(1, 0, replayTarget)
-      replayOutMsgs(1, 0, replayTarget)
+      replayInMsgs(journal, 1, 0, replayTarget)
+      replayOutMsgs(journal, 1, 0, replayTarget)
 
       dequeue(replayQueue) { m => m must be(Message("test-1", sequenceNr = 1, acks = List(1), timestamp = m.timestamp)) }
       dequeue(replayQueue) { m => m must be(Message("test-2", sequenceNr = 2, timestamp = 0L)) }
     }
-    "replay iput messages for n processors with a single command" in { fixture =>
+    "replay input messages for n processors with a single command" in { fixture =>
       import fixture._
 
       journal ! WriteInMsg(1, Message("test-1a"), writeTarget)
@@ -166,7 +167,7 @@ abstract class JournalSpec extends WordSpec with MustMatchers {
       journal ! WriteAck(1, 1, 1)
       journal ! WriteAck(1, 1, 2)
 
-      replayInMsgs(1, 0, replayTarget)
+      replayInMsgs(journal,1, 0, replayTarget)
 
       dequeue(replayQueue) { m => m must be(Message("test-1", sequenceNr = 1, acks = List(1), timestamp = m.timestamp)) }
     }
@@ -270,6 +271,49 @@ abstract class PersistentJournalSpec extends JournalSpec {
     dequeue(replayQueue) { m => m.senderRef must be(r1); m.senderRef must not be(anotherR1) }
     dequeue(replayQueue) { m => m.senderRef must be(null) } // sender ref reset
     dequeue(replayQueue) { m => m.senderRef must be(r3) }
+
+    anotherSystem.shutdown()
+    anotherSystem.awaitTermination(duration)
+  }
+  "in read only mode writes nothing" in { fixture =>
+    import fixture._
+
+    journal ! WriteInMsg(1, Message("test-1"), writeTarget)
+    journal ! WriteInMsg(1, Message("test-2"), writeTarget)
+    journal ! WriteOutMsg(1, Message("test-3"), 1, SkipAck, writeTarget)
+    journal ! ReplayOutMsgs(1, 0, replayTarget)
+
+    dequeue(replayQueue) { m => m must be(Message("test-3", sequenceNr = 3)) }
+
+    system.shutdown()
+    system.awaitTermination(duration)
+
+    val anotherSystem = ActorSystem("test")
+    val readOnlyJournal = readOnlyJournalProps.createJournal(anotherSystem)
+    val anotherWriteTarget = anotherSystem.actorOf(Props(new CommandTarget(writeQueue)))
+    val anotherReplayTarget = anotherSystem.actorOf(Props(new CommandTarget(replayQueue)))
+
+    var sizeBefore = writeQueue.size()
+    readOnlyJournal ! WriteInMsg(1, Message("test-4"), anotherWriteTarget) //noop
+    Thread.sleep(100)
+    writeQueue.size() must equal(sizeBefore)
+
+    sizeBefore = writeQueue.size()
+    readOnlyJournal ! WriteOutMsg(1, Message("test-5"), 1, SkipAck, anotherWriteTarget) //noop
+    Thread.sleep(100)
+    writeQueue.size() must equal(sizeBefore)
+
+    sizeBefore = replayQueue.size()
+    readOnlyJournal ! ReplayInMsgs(1, 3, anotherReplayTarget)
+    Thread.sleep(100)
+    replayQueue.size() must equal(sizeBefore)
+
+    replayQueue.clear()
+    readOnlyJournal ! WriteAck(1, 1, 1) //noop
+    Thread.sleep(100)
+    replayInMsgs(readOnlyJournal,1, 0, anotherReplayTarget)
+    Thread.sleep(100)
+    dequeue(replayQueue) { m => m must be(Message("test-1", sequenceNr = 1, acks = Nil, timestamp = m.timestamp)) }
 
     anotherSystem.shutdown()
     anotherSystem.awaitTermination(duration)

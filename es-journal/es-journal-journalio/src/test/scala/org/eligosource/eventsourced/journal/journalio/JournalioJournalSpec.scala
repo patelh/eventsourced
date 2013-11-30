@@ -28,7 +28,9 @@ import org.eligosource.eventsourced.core.JournalProtocol.ReplayInMsgs
 import org.eligosource.eventsourced.journal.common.PersistentJournalSpec
 
 class JournalioJournalSpec extends PersistentJournalSpec with BeforeAndAfterEach {
-  def journalProps = JournalioJournalProps(JournalioJournalSpec.journalDir)
+  private lazy val props = JournalioJournalProps(JournalioJournalSpec.journalDir)
+  def journalProps = props
+  def readOnlyJournalProps = props.withReadOnly(true)
 
   override def prepareJournal(journal: ActorRef, system: ActorSystem) {
     journal ! ReplayInMsgs(1, 0, system.deadLetters)

@@ -56,32 +56,36 @@ private [eventsourced] class JournalioJournal(val props: JournalioJournalProps) 
   implicit def cmdToBytes(cmd: AnyRef): Array[Byte] = serialization.serializeCommand(cmd)
   implicit def cmdFromBytes(bytes: Array[Byte]): AnyRef = serialization.deserializeCommand(bytes)
 
-  def executeWriteInMsg(cmd: WriteInMsg) {
-    val pmsg = cmd.message.clearConfirmationSettings
-    val pcmd = cmd.copy(message = pmsg, target = null)
-    journal.write(cmdToBytes(pcmd), JournalIO.WriteType.SYNC)
-  }
+  def journalProps = props
 
-  def executeWriteOutMsg(cmd: WriteOutMsg) {
-    val pmsg = cmd.message.clearConfirmationSettings
-    val pcmd = cmdToBytes(cmd.copy(message = pmsg, target = null))
-
-    val loc = journal.write(pcmd, JournalIO.WriteType.SYNC)
-
-    if (cmd.ackSequenceNr != SkipAck) {
-      val ac = WriteAck(cmd.ackProcessorId, cmd.channelId, cmd.ackSequenceNr)
-      journal.write(cmdToBytes(ac), JournalIO.WriteType.SYNC)
+  def writer = new Writer {
+    def executeWriteInMsg(cmd: WriteInMsg) {
+      val pmsg = cmd.message.clearConfirmationSettings
+      val pcmd = cmd.copy(message = pmsg, target = null)
+      journal.write(cmdToBytes(pcmd), JournalIO.WriteType.SYNC)
     }
 
-    writeOutMsgCache.update(cmd, loc)
-  }
+    def executeWriteOutMsg(cmd: WriteOutMsg) {
+      val pmsg = cmd.message.clearConfirmationSettings
+      val pcmd = cmdToBytes(cmd.copy(message = pmsg, target = null))
 
-  def executeWriteAck(cmd: WriteAck) {
-    journal.write(cmdToBytes(cmd), JournalIO.WriteType.SYNC)
-  }
+      val loc = journal.write(pcmd, JournalIO.WriteType.SYNC)
 
-  def executeDeleteOutMsg(cmd: DeleteOutMsg) {
-    writeOutMsgCache.update(cmd).foreach(journal.delete)
+      if (cmd.ackSequenceNr != SkipAck) {
+        val ac = WriteAck(cmd.ackProcessorId, cmd.channelId, cmd.ackSequenceNr)
+        journal.write(cmdToBytes(ac), JournalIO.WriteType.SYNC)
+      }
+
+      writeOutMsgCache.update(cmd, loc)
+    }
+
+    def executeWriteAck(cmd: WriteAck) {
+      journal.write(cmdToBytes(cmd), JournalIO.WriteType.SYNC)
+    }
+
+    def executeDeleteOutMsg(cmd: DeleteOutMsg) {
+      writeOutMsgCache.update(cmd).foreach(journal.delete)
+    }
   }
 
   def executeBatchReplayInMsgs(cmds: Seq[ReplayInMsgs], p: (Message, ActorRef) => Unit) {

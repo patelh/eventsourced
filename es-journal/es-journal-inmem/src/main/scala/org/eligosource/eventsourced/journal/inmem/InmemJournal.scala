@@ -27,30 +27,34 @@ import org.eligosource.eventsourced.journal.common.util._
 /**
  * In-memory journal for testing purposes.
  */
-private [eventsourced] class InmemJournal extends SynchronousWriteReplaySupport {
+private [eventsourced] class InmemJournal(props: InmemJournalProps) extends SynchronousWriteReplaySupport {
   import JournalProtocol._
 
   var redoMap = SortedMap.empty[Key, Any]
   var snapshots = Map.empty[Int, List[Snapshot]]
 
-  def executeWriteInMsg(cmd: WriteInMsg) {
-    redoMap = redoMap + (Key(cmd.processorId, 0, counter, 0) -> cmd.message.clearConfirmationSettings)
-  }
+  def journalProps = props
 
-  def executeWriteOutMsg(cmd: WriteOutMsg) {
-    redoMap = redoMap + (Key(Int.MaxValue, cmd.channelId, counter, 0) -> cmd.message.clearConfirmationSettings)
-
-    if (cmd.ackSequenceNr != SkipAck) {
-      redoMap = redoMap + (Key(cmd.ackProcessorId, 0, cmd.ackSequenceNr, cmd.channelId) -> null)
+  def writer = new Writer {
+    def executeWriteInMsg(cmd: WriteInMsg) {
+      redoMap = redoMap + (Key(cmd.processorId, 0, counter, 0) -> cmd.message.clearConfirmationSettings)
     }
-  }
 
-  def executeWriteAck(cmd: WriteAck) {
-    redoMap = redoMap + (Key(cmd.processorId, 0, cmd.ackSequenceNr, cmd.channelId) -> null)
-  }
+    def executeWriteOutMsg(cmd: WriteOutMsg) {
+      redoMap = redoMap + (Key(Int.MaxValue, cmd.channelId, counter, 0) -> cmd.message.clearConfirmationSettings)
 
-  def executeDeleteOutMsg(cmd: DeleteOutMsg) {
-    redoMap = redoMap - Key(Int.MaxValue, cmd.channelId, cmd.msgSequenceNr, 0)
+      if (cmd.ackSequenceNr != SkipAck) {
+        redoMap = redoMap + (Key(cmd.ackProcessorId, 0, cmd.ackSequenceNr, cmd.channelId) -> null)
+      }
+    }
+
+    def executeWriteAck(cmd: WriteAck) {
+      redoMap = redoMap + (Key(cmd.processorId, 0, cmd.ackSequenceNr, cmd.channelId) -> null)
+    }
+
+    def executeDeleteOutMsg(cmd: DeleteOutMsg) {
+      redoMap = redoMap - Key(Int.MaxValue, cmd.channelId, cmd.msgSequenceNr, 0)
+    }
   }
 
   def executeBatchReplayInMsgs(cmds: Seq[ReplayInMsgs], p: (Message, ActorRef) => Unit) {

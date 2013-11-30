@@ -33,7 +33,9 @@ class MongodbCasbahJournalSpec extends PersistentJournalSpec with MongodbSpecSup
   // Since multiple embedded instances will run, each one must have a different port.
   override def mongoPort = 54321
 
-  def journalProps = MongodbCasbahJournalProps(MongoClient(mongoLocalHostName, mongoPort), dbName, collName)
+  private lazy val props = MongodbCasbahJournalProps(MongoClient(mongoLocalHostName, mongoPort), dbName, collName)
+  def journalProps = props
+  def readOnlyJournalProps = props.withReadOnly(true)
 
   override def afterEach() {
     MongoClient(mongoLocalHostName, mongoPort)(dbName)(collName).dropCollection()

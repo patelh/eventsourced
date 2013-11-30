@@ -29,11 +29,13 @@ trait HBaseSpec extends HBaseCleanup with BeforeAndAfterEach with BeforeAndAfter
   var client: HTable = _
 
   def zookeeperQuorum = "localhost:%d" format port
-  def journalProps = {
+  private lazy val props = {
     HBaseJournalProps(zookeeperQuorum)
       .withReplayChunkSize(8)
       .withSnapshotFilesystem(util.getTestFileSystem)
   }
+  def journalProps = props
+  def readOnlyJournalProps = props.withReadOnly(true)
 
   override def afterEach() {
     cleanup()

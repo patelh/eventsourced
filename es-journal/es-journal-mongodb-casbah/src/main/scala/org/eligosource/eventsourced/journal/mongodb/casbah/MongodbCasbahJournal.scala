@@ -38,31 +38,35 @@ private [eventsourced] class MongodbCasbahJournal(val props: MongodbCasbahJourna
   implicit def msgToBytes(msg: Message): Array[Byte] = serialization.serializeMessage(msg)
   implicit def msgFromBytes(bytes: Array[Byte]): Message = serialization.deserializeMessage(bytes)
 
-  def executeWriteInMsg(cmd: WriteInMsg) {
-    val msgJSON = createMessageJSON(cmd.processorId, 0, counter, 0, msgToBytes(cmd.message.clearConfirmationSettings))
-    collection.insert(msgJSON, WriteConcern.Normal)
-  }
+  def journalProps = props
 
-  def executeWriteOutMsg(cmd: WriteOutMsg) {
-    val msgJSON = createMessageJSON(Int.MaxValue, cmd.channelId, counter, 0, msgToBytes(cmd.message.clearConfirmationSettings))
-    collection.insert(msgJSON, WriteConcern.Normal)
-    if (cmd.ackSequenceNr != SkipAck) {
-      val msgJSON = createMessageJSON(cmd.ackProcessorId, 0, cmd.ackSequenceNr, cmd.channelId, Array.empty[Byte])
+  def writer = new Writer {
+    def executeWriteInMsg(cmd: WriteInMsg) {
+      val msgJSON = createMessageJSON(cmd.processorId, 0, counter, 0, msgToBytes(cmd.message.clearConfirmationSettings))
       collection.insert(msgJSON, WriteConcern.Normal)
     }
-  }
 
-  def executeWriteAck(cmd: WriteAck) {
-    val msgJSON = createMessageJSON(cmd.processorId, 0, cmd.ackSequenceNr, cmd.channelId, Array.empty[Byte])
-    collection.insert(msgJSON, WriteConcern.Normal)
-  }
+    def executeWriteOutMsg(cmd: WriteOutMsg) {
+      val msgJSON = createMessageJSON(Int.MaxValue, cmd.channelId, counter, 0, msgToBytes(cmd.message.clearConfirmationSettings))
+      collection.insert(msgJSON, WriteConcern.Normal)
+      if (cmd.ackSequenceNr != SkipAck) {
+        val msgJSON = createMessageJSON(cmd.ackProcessorId, 0, cmd.ackSequenceNr, cmd.channelId, Array.empty[Byte])
+        collection.insert(msgJSON, WriteConcern.Normal)
+      }
+    }
 
-  def executeDeleteOutMsg(cmd: DeleteOutMsg) {
-    collection.remove(MongoDBObject(
-      "processorId"         -> Int.MaxValue,
-      "initiatingChannelId" -> cmd.channelId,
-      "sequenceNr"          -> cmd.msgSequenceNr,
-      "confirmingChannelId" -> 0))
+    def executeWriteAck(cmd: WriteAck) {
+      val msgJSON = createMessageJSON(cmd.processorId, 0, cmd.ackSequenceNr, cmd.channelId, Array.empty[Byte])
+      collection.insert(msgJSON, WriteConcern.Normal)
+    }
+
+    def executeDeleteOutMsg(cmd: DeleteOutMsg) {
+      collection.remove(MongoDBObject(
+        "processorId"         -> Int.MaxValue,
+        "initiatingChannelId" -> cmd.channelId,
+        "sequenceNr"          -> cmd.msgSequenceNr,
+        "confirmingChannelId" -> 0))
+    }
   }
 
   def executeBatchReplayInMsgs(cmds: Seq[ReplayInMsgs], p: (Message, ActorRef) => Unit) {

@@ -22,6 +22,7 @@ import akka.actor._
 
 import org.eligosource.eventsourced.core._
 import org.eligosource.eventsourced.core.JournalProtocol._
+import org.eligosource.eventsourced.journal.common.JournalProps
 
 trait SynchronousWriteReplaySupport extends Actor {
   import context.dispatcher
@@ -32,30 +33,51 @@ trait SynchronousWriteReplaySupport extends Actor {
   private var _counter = 0L
   private var _counterInit = 0L
 
+  private lazy val w = if(journalProps.readOnly) new ReadOnlyWriter else writer
+  private lazy val ro = journalProps.readOnly
+  protected def writer: Writer
+
+  def journalProps: JournalProps
+
+  def writeInMsg(cmd: WriteInMsg) = {
+    val c = if(cmd.genSequenceNr) cmd.withSequenceNr(counter) else { _counter = cmd.message.sequenceNr; cmd }
+    val ct = c.withTimestamp
+    w.executeWriteInMsg(ct)
+    ct.target forward Written(ct.message)
+    commandListener.foreach(_ ! cmd)
+    _counter += 1L
+  }
+
+  def writeOutMsg(cmd: WriteOutMsg) = {
+    val c = if(cmd.genSequenceNr) cmd.withSequenceNr(counter) else { _counter = cmd.message.sequenceNr; cmd }
+    w.executeWriteOutMsg(c)
+    c.target forward Written(c.message)
+    commandListener.foreach(_ ! cmd)
+    _counter += 1L
+  }
+
+  def writeAck(cmd: WriteAck) = {
+    w.executeWriteAck(cmd)
+    commandListener.foreach(_ ! cmd)
+  }
+
+  def deleteOutMsg(cmd: DeleteOutMsg) = {
+    w.executeDeleteOutMsg(cmd)
+    commandListener.foreach(_ ! cmd)
+  }
+
+  private def noop(cmd: Any) = {}
+
+  private lazy val writeInMsgF: WriteInMsg=>Unit = if(ro) noop else writeInMsg
+  private lazy val writeOutMsgF: WriteOutMsg=>Unit = if(ro) noop else writeOutMsg
+  private lazy val writeAckF: WriteAck=>Unit = if(ro) noop else writeAck
+  private lazy val deleteOutMsgF: DeleteOutMsg=>Unit = if(ro) noop else deleteOutMsg
+
   def receive = {
-    case cmd: WriteInMsg => {
-      val c = if(cmd.genSequenceNr) cmd.withSequenceNr(counter) else { _counter = cmd.message.sequenceNr; cmd }
-      val ct = c.withTimestamp
-      executeWriteInMsg(ct)
-      ct.target forward Written(ct.message)
-      commandListener.foreach(_ ! cmd)
-      _counter += 1L
-    }
-    case cmd: WriteOutMsg => {
-      val c = if(cmd.genSequenceNr) cmd.withSequenceNr(counter) else { _counter = cmd.message.sequenceNr; cmd }
-      executeWriteOutMsg(c)
-      c.target forward Written(c.message)
-      commandListener.foreach(_ ! cmd)
-      _counter += 1L
-    }
-    case cmd: WriteAck => {
-      executeWriteAck(cmd)
-      commandListener.foreach(_ ! cmd)
-    }
-    case cmd: DeleteOutMsg => {
-      executeDeleteOutMsg(cmd)
-      commandListener.foreach(_ ! cmd)
-    }
+    case cmd: WriteInMsg => writeInMsgF(cmd)
+    case cmd: WriteOutMsg => writeOutMsgF(cmd)
+    case cmd: WriteAck => writeAckF(cmd)
+    case cmd: DeleteOutMsg => deleteOutMsgF(cmd)
     case Loop(msg, target) => {
       target forward (Looped(msg))
     }
@@ -156,45 +178,59 @@ trait SynchronousWriteReplaySupport extends Actor {
    */
   def snapshotSaved(metadata: SnapshotMetadata)
 
-  /**
-   * Instructs a journal provider to write an input message.
-   *
-   * @param cmd command to be executed by the journal provider.
-   *
-   * @see [[org.eligosource.eventsourced.core.JournalProtocol.WriteInMsg]]
-   */
-  def executeWriteInMsg(cmd: WriteInMsg)
+  trait Writer {
+    /**
+     * Instructs a journal provider to write an input message.
+     *
+     * @param cmd command to be executed by the journal provider.
+     *
+     * @see [[org.eligosource.eventsourced.core.JournalProtocol.WriteInMsg]]
+     */
+    def executeWriteInMsg(cmd: WriteInMsg)
 
-  /**
-   * Instructs a journal provider to write an output message,
-   * optionally together with an acknowledgement.
-   *
-   * @param cmd command to be executed by the journal provider.
-   *
-   * @see [[org.eligosource.eventsourced.core.JournalProtocol.WriteInMsg]]
-   */
-  def executeWriteOutMsg(cmd: WriteOutMsg)
+    /**
+     * Instructs a journal provider to write an output message,
+     * optionally together with an acknowledgement.
+     *
+     * @param cmd command to be executed by the journal provider.
+     *
+     * @see [[org.eligosource.eventsourced.core.JournalProtocol.WriteInMsg]]
+     */
+    def executeWriteOutMsg(cmd: WriteOutMsg)
 
-  /**
-   * Instructs a journal provider to write an acknowledgement.
-   *
-   * @param cmd command to be executed by the journal provider.
-   *
-   * @see [[org.eligosource.eventsourced.core.JournalProtocol.WriteAck]]
-   * @see [[org.eligosource.eventsourced.core.DefaultChannel]]
-   * @see [[org.eligosource.eventsourced.core.ReliableChannel]]
-   */
-  def executeWriteAck(cmd: WriteAck)
+    /**
+     * Instructs a journal provider to write an acknowledgement.
+     *
+     * @param cmd command to be executed by the journal provider.
+     *
+     * @see [[org.eligosource.eventsourced.core.JournalProtocol.WriteAck]]
+     * @see [[org.eligosource.eventsourced.core.DefaultChannel]]
+     * @see [[org.eligosource.eventsourced.core.ReliableChannel]]
+     */
+    def executeWriteAck(cmd: WriteAck)
 
-  /**
-   * Instructs a journal provider to delete an output message.
-   *
-   * @param cmd command to be executed by the journal provider.
-   *
-   * @see [[org.eligosource.eventsourced.core.JournalProtocol.DeleteOutMsg]]
-   * @see [[org.eligosource.eventsourced.core.ReliableChannel]]
-   */
-  def executeDeleteOutMsg(cmd: DeleteOutMsg)
+    /**
+     * Instructs a journal provider to delete an output message.
+     *
+     * @param cmd command to be executed by the journal provider.
+     *
+     * @see [[org.eligosource.eventsourced.core.JournalProtocol.DeleteOutMsg]]
+     * @see [[org.eligosource.eventsourced.core.ReliableChannel]]
+     */
+    def executeDeleteOutMsg(cmd: DeleteOutMsg)
+
+  }
+
+  class ReadOnlyWriter extends Writer {
+    def executeWriteInMsg(cmd: WriteInMsg) =
+      throw new RuntimeException("Read-only mode!")
+    def executeWriteOutMsg(cmd: WriteOutMsg) =
+      throw new RuntimeException("Read-only mode!")
+    def executeWriteAck(cmd: _root_.org.eligosource.eventsourced.core.JournalProtocol.WriteAck): Unit =
+      throw new RuntimeException("Read-only mode!")
+    def executeDeleteOutMsg(cmd: DeleteOutMsg): Unit =
+      throw new RuntimeException("Read-only mode!")
+  }
 
   /**
    * Instructs a journal provider to batch-replay input messages.

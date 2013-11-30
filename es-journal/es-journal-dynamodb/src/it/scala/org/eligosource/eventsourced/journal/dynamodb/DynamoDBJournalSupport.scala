@@ -11,12 +11,20 @@ trait DynamoDBJournalSupport extends BeforeAndAfterEach with BeforeAndAfterAll {
 
   var _app = System.currentTimeMillis().toString
 
-  def journalProps: JournalProps = {
+  private lazy val props = {
     val key = sys.env("AWS_ACCESS_KEY_ID")
     val secret = sys.env("AWS_SECRET_ACCESS_KEY")
     val table = sys.env("TEST_TABLE")
     val app = _app
     DynamoDBJournalProps(table, app, key, secret, counterShards = 10, operationTimeout = Timeout(30 seconds))
+  }
+
+  def journalProps: JournalProps = {
+    props
+  }
+
+  def readOnlyJournalProps: JournalProps = {
+    props.withReadOnly(true)
   }
 
   override protected def afterEach() {

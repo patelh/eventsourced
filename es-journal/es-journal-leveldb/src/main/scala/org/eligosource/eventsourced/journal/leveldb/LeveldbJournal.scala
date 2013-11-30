@@ -30,6 +30,8 @@ trait LeveldbJournal { this: Actor =>
 
   val serialization = CommandSerialization(context.system)
 
+  def journalProps = props
+
   def factory = {
     if (props.native) org.fusesource.leveldbjni.JniDBFactory.factory
     else org.iq80.leveldb.impl.Iq80DBFactory.factory

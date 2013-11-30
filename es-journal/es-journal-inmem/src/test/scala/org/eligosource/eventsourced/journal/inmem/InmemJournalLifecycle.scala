@@ -1,5 +1,8 @@
 package org.eligosource.eventsourced.journal.inmem
 
 trait InmemJournalLifecycle {
-  def journalProps = InmemJournalProps()
+  private lazy val props = InmemJournalProps()
+  def journalProps = props
+  def readOnlyJournalProps = props.withReadOnly(true)
+
 }

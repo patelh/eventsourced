@@ -43,4 +43,9 @@ trait JournalProps {
    * Creates a journal actor instance.
    */
   protected def createJournalActor: Actor
+
+  /**
+   * Make journal read only (e.g. offline snapshot)
+   */
+  def readOnly: Boolean
 }

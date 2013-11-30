@@ -53,17 +53,25 @@ object LeveldbJournalSpec {
 }
 
 class LeveldbJournalPSNativeSpec extends LeveldbJournalSpec with LeveldbCleanup {
-  def journalProps = LeveldbJournalProps(LeveldbJournalSpec.journalDir)
+  private lazy val props = LeveldbJournalProps(LeveldbJournalSpec.journalDir)
+  def journalProps = props
+  def readOnlyJournalProps = props.withReadOnly(true)
 }
 
 class LeveldbJournalSSNativeSpec extends JournalSpec with LeveldbCleanup {
-  def journalProps = LeveldbJournalProps(LeveldbJournalSpec.journalDir).withSequenceStructure
+  private lazy val props = LeveldbJournalProps(LeveldbJournalSpec.journalDir).withSequenceStructure
+  def journalProps = props
+  def readOnlyJournalProps = props.withReadOnly(true)
 }
 
 class LeveldbJournalPSJavaSpec extends LeveldbJournalSpec with LeveldbCleanup {
-  def journalProps = LeveldbJournalProps(LeveldbJournalSpec.journalDir).withNative(false)
+  private lazy val props = LeveldbJournalProps(LeveldbJournalSpec.journalDir).withNative(false)
+  def journalProps = props
+  def readOnlyJournalProps = props.withReadOnly(true)
 }
 
 class LeveldbJournalSSJavaSpec extends JournalSpec with LeveldbCleanup {
-  def journalProps = LeveldbJournalProps(LeveldbJournalSpec.journalDir).withSequenceStructure.withNative(false)
+  private lazy val props = LeveldbJournalProps(LeveldbJournalSpec.journalDir).withSequenceStructure.withNative(false)
+  def journalProps = props
+  def readOnlyJournalProps = props.withReadOnly(true)
 }

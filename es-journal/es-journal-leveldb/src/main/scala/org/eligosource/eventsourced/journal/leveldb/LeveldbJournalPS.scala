@@ -51,28 +51,30 @@ private [eventsourced] class LeveldbJournalPS(val props: LeveldbJournalProps) ex
   implicit def msgToBytes(msg: Message): Array[Byte] = serialization.serializeMessage(msg)
   implicit def msgFromBytes(bytes: Array[Byte]): Message = serialization.deserializeMessage(bytes)
 
-  def executeWriteInMsg(cmd: WriteInMsg): Unit = withBatch { batch =>
-    val msg = cmd.message
-    batch.put(CounterKeyBytes, counterToBytes(counter))
-    batch.put(Key(cmd.processorId, 0, msg.sequenceNr, 0), msg.clearConfirmationSettings)
-  }
+  def writer = new Writer {
+    def executeWriteInMsg(cmd: WriteInMsg): Unit = withBatch { batch =>
+      val msg = cmd.message
+      batch.put(CounterKeyBytes, counterToBytes(counter))
+      batch.put(Key(cmd.processorId, 0, msg.sequenceNr, 0), msg.clearConfirmationSettings)
+    }
 
-  def executeWriteOutMsg(cmd: WriteOutMsg): Unit = withBatch { batch =>
-    val msg = cmd.message
-    batch.put(CounterKeyBytes, counterToBytes(counter))
-    batch.put(Key(Int.MaxValue, cmd.channelId, msg.sequenceNr, 0), msg.clearConfirmationSettings)
-    if (cmd.ackSequenceNr != SkipAck)
-      batch.put(Key(cmd.ackProcessorId, 0, cmd.ackSequenceNr, cmd.channelId), Array.empty[Byte])
-  }
+    def executeWriteOutMsg(cmd: WriteOutMsg): Unit = withBatch { batch =>
+      val msg = cmd.message
+      batch.put(CounterKeyBytes, counterToBytes(counter))
+      batch.put(Key(Int.MaxValue, cmd.channelId, msg.sequenceNr, 0), msg.clearConfirmationSettings)
+      if (cmd.ackSequenceNr != SkipAck)
+        batch.put(Key(cmd.ackProcessorId, 0, cmd.ackSequenceNr, cmd.channelId), Array.empty[Byte])
+    }
 
-  def executeWriteAck(cmd: WriteAck) {
-    val k = Key(cmd.processorId, 0, cmd.ackSequenceNr, cmd.channelId)
-    leveldb.put(k, Array.empty[Byte], levelDbWriteOptions)
-  }
+    def executeWriteAck(cmd: WriteAck) {
+      val k = Key(cmd.processorId, 0, cmd.ackSequenceNr, cmd.channelId)
+      leveldb.put(k, Array.empty[Byte], levelDbWriteOptions)
+    }
 
-  def executeDeleteOutMsg(cmd: DeleteOutMsg) {
-    val k = Key(Int.MaxValue, cmd.channelId, cmd.msgSequenceNr, 0)
-    leveldb.delete(k, levelDbWriteOptions)
+    def executeDeleteOutMsg(cmd: DeleteOutMsg) {
+      val k = Key(Int.MaxValue, cmd.channelId, cmd.msgSequenceNr, 0)
+      leveldb.delete(k, levelDbWriteOptions)
+    }
   }
 
   def executeBatchReplayInMsgs(cmds: Seq[ReplayInMsgs], p: (Message, ActorRef) => Unit) {

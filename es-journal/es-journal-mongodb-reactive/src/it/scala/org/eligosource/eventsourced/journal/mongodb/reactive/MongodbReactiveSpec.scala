@@ -99,7 +99,9 @@ trait MongodbReactiveSpec extends BeforeAndAfterEach with BeforeAndAfterAll { se
 class MongodbReactiveJournalSpec extends PersistentJournalSpec with MongodbReactiveSpec {
 
   def mongoPort = 55000
-  def journalProps = MongodbReactiveJournalProps(List(mongoLocalHostName + ":" + mongoPort))
+  private lazy val props = MongodbReactiveJournalProps(List(mongoLocalHostName + ":" + mongoPort))
+  def journalProps = props
+  def readOnlyJournalProps = props.withReadOnly(true)
 
   "fetch the highest reactive message counter as sequence nbr in correct order after 1000 messages" in { fixture =>
     import fixture._
@@ -140,7 +142,9 @@ class MongodbReactiveJournalSpec extends PersistentJournalSpec with MongodbReact
 class MongodbReactiveJournalWithWriteConcernSpec extends PersistentJournalSpec with MongodbReactiveSpec {
 
   def mongoPort = 56000
-  def journalProps = MongodbReactiveJournalProps(List(mongoLocalHostName + ":" + mongoPort), writeConcern = GetLastError(fsync = true))
+  private lazy val props = MongodbReactiveJournalProps(List(mongoLocalHostName + ":" + mongoPort), writeConcern = GetLastError(fsync = true))
+  def journalProps = props
+  def readOnlyJournalProps = props.withReadOnly(true)
 
   "fetch the highest reactive message counter as sequence nbr in correct order after 1000 messages" in { fixture =>
     import fixture._

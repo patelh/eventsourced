@@ -52,34 +52,36 @@ private [eventsourced] class LeveldbJournalSS(val props: LeveldbJournalProps) ex
   implicit def cmdToBytes(cmd: AnyRef): Array[Byte] = serialization.serializeCommand(cmd)
   implicit def cmdFromBytes[A](bytes: Array[Byte]): A = serialization.deserializeCommand(bytes).asInstanceOf[A]
 
-  def executeWriteInMsg(cmd: WriteInMsg) = withBatch { batch =>
-    val pmsg = cmd.message.clearConfirmationSettings
-    val pcmd = cmdToBytes(cmd.copy(message = pmsg, target = null))
+  def writer = new Writer {
+    def executeWriteInMsg(cmd: WriteInMsg) = withBatch { batch =>
+      val pmsg = cmd.message.clearConfirmationSettings
+      val pcmd = cmdToBytes(cmd.copy(message = pmsg, target = null))
 
-    batch.put(CounterKeyBytes, counterToBytes(counter))
-    batch.put(SSKey(In, counter, 0), pcmd)
-  }
-
-  def executeWriteOutMsg(cmd: WriteOutMsg) = withBatch { batch =>
-    val pmsg = cmd.message.clearConfirmationSettings
-    val pcmd = cmdToBytes(cmd.copy(message = pmsg, target = null))
-
-    batch.put(CounterKeyBytes, counterToBytes(counter))
-    batch.put(SSKey(Out, counter, 0), pcmd)
-
-    if (cmd.ackSequenceNr != SkipAck) {
-      batch.put(SSKey(In, cmd.ackSequenceNr, cmd.channelId), Array.empty[Byte])
+      batch.put(CounterKeyBytes, counterToBytes(counter))
+      batch.put(SSKey(In, counter, 0), pcmd)
     }
 
-    writeOutMsgCache.update(cmd, pmsg.sequenceNr)
-  }
+    def executeWriteOutMsg(cmd: WriteOutMsg) = withBatch { batch =>
+      val pmsg = cmd.message.clearConfirmationSettings
+      val pcmd = cmdToBytes(cmd.copy(message = pmsg, target = null))
 
-  def executeWriteAck(cmd: WriteAck) {
-    leveldb.put(SSKey(In, cmd.ackSequenceNr, cmd.channelId), Array.empty[Byte])
-  }
+      batch.put(CounterKeyBytes, counterToBytes(counter))
+      batch.put(SSKey(Out, counter, 0), pcmd)
 
-  def executeDeleteOutMsg(cmd: DeleteOutMsg) {
-    writeOutMsgCache.update(cmd).foreach { loc => leveldb.delete(SSKey(Out, loc, 0)) }
+      if (cmd.ackSequenceNr != SkipAck) {
+        batch.put(SSKey(In, cmd.ackSequenceNr, cmd.channelId), Array.empty[Byte])
+      }
+
+      writeOutMsgCache.update(cmd, pmsg.sequenceNr)
+    }
+
+    def executeWriteAck(cmd: WriteAck) {
+      leveldb.put(SSKey(In, cmd.ackSequenceNr, cmd.channelId), Array.empty[Byte])
+    }
+
+    def executeDeleteOutMsg(cmd: DeleteOutMsg) {
+      writeOutMsgCache.update(cmd).foreach { loc => leveldb.delete(SSKey(Out, loc, 0)) }
+    }
   }
 
   def executeBatchReplayInMsgs(cmds: Seq[ReplayInMsgs], p: (Message, ActorRef) => Unit) {
